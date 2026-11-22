@@ -1762,6 +1762,57 @@ document.addEventListener("change",e=>{const el=e.target;if(el.id==="lfMom")LFMO
 try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
 if("serviceWorker" in navigator&&location.protocol==="https:")window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 
+/* ================= LICENCIA (Gumroad) =================
+   Pantalla de código antes de todo. Activa: verify con increment_uses_count=true, vale si success, uses ≤ 3 y sin devolución,
+   contracargo ni disputa. Después se recomprueba como mucho una vez al día sin sumar usos. Sin internet: 14 días de margen.
+   Los datos de la app (gymnarly-v1) nunca se tocan. */
+const GUM_PRODUCT="-sVKQDUapFBfUATDrmTOMQ==";
+const GUM_BUY="https://yassirtalidi.gumroad.com/l/gymnarly";
+const LIC_LS="gymnarly-licencia",LIC_MAXUSES=3,LIC_GRACE=14*864e5,LIC_EVERY=864e5;
+let LIC=(()=>{try{return JSON.parse(localStorage.getItem(LIC_LS)||"null")}catch(e){return null}})();
+let licMsg="",licBusy=false;
+function licSave(){try{if(LIC)localStorage.setItem(LIC_LS,JSON.stringify(LIC));else localStorage.removeItem(LIC_LS)}catch(e){}}
+function licOk(){return !!(LIC&&LIC.key&&Date.now()-(LIC.ok||0)<LIC_GRACE)}
+async function gumVerify(key,inc){
+  const body=new URLSearchParams({product_id:GUM_PRODUCT,license_key:key,increment_uses_count:inc?"true":"false"});
+  const r=await fetch("https://api.gumroad.com/v2/licenses/verify",{method:"POST",body});
+  let j={};try{j=await r.json()}catch(e){}
+  return {status:r.status,j}}
+function licProblem(j){const p=j.purchase||{};
+  if(!j.success)return /disabled/i.test(j.message||"")?"Este código está desactivado. Si crees que es un error, escribe al vendedor desde tu recibo de Gumroad.":"Ese código no existe. Cópialo tal cual del correo de Gumroad (con los guiones).";
+  if(p.refunded)return "Esta compra se devolvió, así que el código ya no vale.";
+  if(p.chargebacked||p.disputed)return "Esta compra tiene un cargo en disputa, así que el código no vale ahora mismo.";
+  return ""}
+async function licActivate(key){key=(key||"").trim();if(!key){licMsg="Pega tu código de licencia.";render();return}
+  licBusy=true;licMsg="";render();
+  try{const {j}=await gumVerify(key,true);const bad=licProblem(j);
+    if(bad)licMsg=bad;
+    else if((j.uses||0)>LIC_MAXUSES)licMsg=`Este código ya se ha activado en ${j.uses-1} dispositivos (máximo ${LIC_MAXUSES}). Si has cambiado de móvil, escribe al vendedor desde tu recibo de Gumroad.`;
+    else{LIC={key,ok:Date.now(),chk:Date.now()};licSave();licBusy=false;render();toast("Gymnarly activada");return}}
+  catch(e){licMsg="Sin conexión. Para activar el código hace falta internet una vez."}
+  licBusy=false;render()}
+async function licRecheck(){if(!LIC||!LIC.key||!navigator.onLine||Date.now()-(LIC.chk||0)<LIC_EVERY)return;
+  try{const {status,j}=await gumVerify(LIC.key,false);LIC.chk=Date.now();
+    const bad=status>=500?"":licProblem(j);
+    if(bad){LIC=null;licMsg=bad;licSave();render();return}
+    if(status<500){LIC.ok=Date.now();licSave()}}
+  catch(e){/* sin red: sigue valiendo hasta 14 días desde la última comprobación buena */}}
+function viewLicense(){const exp=LIC&&LIC.key&&!licOk();
+  return `<div class="ob"><div class="logo3" aria-hidden="true"><i style="background:var(--train)"></i><i style="background:var(--food)"></i><i style="background:var(--mind)"></i></div><h1 class="big3d">Gym<br><span class="grad-t">narly</span></h1>
+   <p style="font-size:17px">${exp?"Hace más de 14 días que no se comprueba tu código. Conéctate a internet y ábrela otra vez.":"Mete el código de licencia que te llegó por correo al comprar en Gumroad."}</p>
+   <label class="f">Código de licencia<input id="licIn" value="${esc((LIC&&LIC.key)||"")}" placeholder="XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX" autocomplete="off" autocapitalize="characters" spellcheck="false" style="font-family:var(--mono);letter-spacing:.04em"></label>
+   ${licMsg?`<p class="small" style="color:var(--down)">${esc(licMsg)}</p>`:""}
+   <div class="row"><button class="primary" data-lic="go" ${licBusy?"disabled":""}>${licBusy?"Comprobando…":exp?"Comprobar otra vez":"Activar"}</button><a class="buy" href="${GUM_BUY}" target="_blank" rel="noopener">Comprar Gymnarly</a></div>
+   <p class="small muted">Pago único. El código vale para ${LIC_MAXUSES} dispositivos. Tus datos se guardan solo en tu móvil${S.profile?" y siguen aquí: no se borra nada":""}.</p></div>`}
+const _renderApp=render;
+render=function(){const v=$("#view");if(!v)return;
+  if(licOk())return _renderApp();
+  $("#tabs").hidden=true;$("#meBtn").hidden=true;document.body.dataset.tab="ob";v.innerHTML=viewLicense();enter(v,"lic")};
+document.addEventListener("click",e=>{const b=e.target.closest("[data-lic]");if(!b||b.disabled)return;if(b.dataset.lic==="go"){if(LIC&&LIC.key&&!licOk()&&(($("#licIn")||{}).value||"").trim()===LIC.key){LIC.chk=0;licRecheck().then(render);return}licActivate(($("#licIn")||{}).value)}});
+document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.id==="licIn"){e.preventDefault();licActivate(e.target.value)}});
+licRecheck();window.addEventListener("online",licRecheck);document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")licRecheck()});
+(()=>{const st=document.createElement("style");st.textContent="a.buy{font:600 15px var(--body);border-radius:999px;border:1px solid var(--stroke);background:var(--glass2);color:var(--fg);padding:11px 16px;text-decoration:none;display:inline-flex;align-items:center}";document.head.appendChild(st)})();
+
 /* ================= BIENVENIDA (usuario nuevo) ================= */
 let ob=null,obStep=0,obEdit=false,obErr="";
 const RESTR=["Sin cerdo (halal)","Vegetariano","Vegano","Sin lactosa","Sin gluten","Sin pescado ni marisco","Sin frutos secos"];
